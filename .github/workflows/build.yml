@@ -18,35 +18,32 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      # שימוש ב-setup-python עם יכולת מטמון מובנית
+      - name: Set up Python with dependency caching
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          # זה החלק החשוב: הוא מנהל את מטמון ה-pip באופן אוטומטי ואמין
+          cache: 'pip'
 
-      # שלב חדש: הגדרת מטמון עבור התלויות של Pip
-      - name: Cache Pip dependencies
-        id: cache-pip
-        uses: actions/cache@v4
-        with:
-          path: ~\pip\Cache # מיקום המטמון של Pip בווינדוס
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      # שלב חדש: הגדרת מטמון עבור הקבצים הבינאריים החיצוניים
+      # הגדרת מטמון עבור הקבצים הבינאריים
       - name: Cache external binaries
         id: cache-binaries
         uses: actions/cache@v4
         with:
-          path: ./ext-tools # נשמור את הקבצים בתיקייה ייעודית
-          key: ${{ runner.os }}-binaries-v1 # מפתח סטטי. שנה ל-v2 אם תרצה לרענן את המטמון
+          # נשמור את הקבצים בתיקייה ייעודית. חשוב ליצור אותה לפני
+          path: ./ext-tools
+          key: ${{ runner.os }}-binaries-v1
+
+      # יצירת תיקיית הכלים לפני ההורדה
+      - name: Create external tools directory
+        run: New-Item -ItemType Directory -Force -Path "./ext-tools"
 
       # הורדת הקבצים רק אם הם לא נמצאו במטמון
       - name: Download binaries if cache miss
         if: steps.cache-binaries.outputs.cache-hit != 'true'
         run: |
           $baseUrl = "https://github.com/AMAARETS/files/releases/download/v1"
-          New-Item -ItemType Directory -Force -Path "./ext-tools"
           Write-Host "Cache not found. Downloading binaries..."
           Invoke-WebRequest -Uri "$baseUrl/apktool.jar" -OutFile "./ext-tools/apktool.jar"
           Invoke-WebRequest -Uri "$baseUrl/apksigner.jar" -OutFile "./ext-tools/apksigner.jar"
@@ -55,24 +52,29 @@ jobs:
           Write-Host "All files downloaded successfully."
         shell: pwsh
 
-      # חילוץ ה-JRE רק אם הורדנו אותו (כלומר, לא היה במטמון)
-      - name: Extract JRE if cache miss
-        if: steps.cache-binaries.outputs.cache-hit != 'true'
+      # חילוץ ה-JRE ישירות לתיקייה הנכונה
+      - name: Extract JRE from downloaded zip
         run: |
-          Expand-Archive -Path './ext-tools/jre.zip' -DestinationPath './ext-tools/'
-          Write-Host "JRE extracted successfully."
+          # נחלץ רק אם קובץ ה-zip קיים (כלומר, הורדנו אותו או שוחזר מהמטמון)
+          if (Test-Path ./ext-tools/jre.zip) {
+            Expand-Archive -Path './ext-tools/jre.zip' -DestinationPath './ext-tools/' -Force
+            # נמחק את ה-zip לאחר החילוץ כדי לחסוך מקום במטמון
+            Remove-Item './ext-tools/jre.zip'
+            Write-Host "JRE extracted successfully."
+          } else {
+            Write-Host "JRE folder already exists in cache. Skipping extraction."
+          }
         shell: pwsh
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
-          # ההתקנה תהיה מהירה מאוד אם המטמון קיים
+          # ההתקנה תהיה מהירה מאוד בזכות המטמון המובנה של setup-python
           if (Test-Path requirements.txt) { pip install -r requirements.txt }
 
       - name: Build with PyInstaller
         run: |
-          # שים לב שהנתיבים לקבצים עודכנו לתיקיית ext-tools
           pyinstaller --name "APKTranslator" `
             --onefile `
             --windowed `
