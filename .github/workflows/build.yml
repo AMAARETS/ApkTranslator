@@ -1,13 +1,12 @@
 # .github/workflows/build.yml
 
-name: Build Python EXE and Create Release
+name: Build EXE by Downloading Binaries and Releasing
 
 on:
   push:
     branches:
       - main
 
-# >>> הוספת הרשאות כתיבה לתהליך <<<
 permissions:
   contents: write
 
@@ -16,35 +15,64 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # שלב 1: הורדת קוד המקור של הפרויקט
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # שלב 2: התקנת פייתון
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      # שלב 3: הורדת כל הקבצים הבינאריים מהמאגר החיצוני
+      - name: Download required binaries from release
+        run: |
+          $baseUrl = "https://github.com/AMAARETS/files/releases/download/v1"
+          Write-Host "Downloading binaries from $baseUrl..."
+          Invoke-WebRequest -Uri "$baseUrl/apktool.jar" -OutFile "apktool.jar"
+          Invoke-WebRequest -Uri "$baseUrl/apksigner.jar" -OutFile "apksigner.jar"
+          Invoke-WebRequest -Uri "$baseUrl/key.jks" -OutFile "key.jks"
+          Invoke-WebRequest -Uri "$baseUrl/jre.zip" -OutFile "jre.zip"
+          Write-Host "All files downloaded successfully."
+        shell: pwsh
+
+      # שלב 4: חילוץ תיקיית ה-JRE
+      - name: Extract JRE folder
+        run: |
+          Expand-Archive -Path 'jre.zip' -DestinationPath '.'
+          # הפקודה הזו תיצור תיקיית 'jre' בשורש סביבת הריצה, בדיוק כפי שנדרש
+          Write-Host "JRE extracted successfully."
+        shell: pwsh
+
+      # שלב 5: התקנת תלויות פייתון
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
           if (Test-Path requirements.txt) { pip install -r requirements.txt }
 
+      # שלב 6: קימפול עם PyInstaller והוספת כל הקבצים שהורדו
       - name: Build with PyInstaller
-        # !!! הקפד להחליף את 'ApkTranslator.py' בשם הקובץ שלך
-        run: pyinstaller --onefile --noconsole ApkTranslator.py
+        run: |
+          pyinstaller --name "APKTranslator" `
+            --onefile `
+            --windowed `
+            --add-data "apktool.jar;." `
+            --add-data "apksigner.jar;." `
+            --add-data "key.jks;." `
+            --add-data "jre;jre" `
+            ApkTranslator.py  # !!! החלף כאן בשם הסקריפט האמיתי שלך
 
+      # שלב 7: יצירת גירסה חדשה והעלאת קובץ ה-EXE
       - name: Create Release and Upload EXE
         uses: softprops/action-gh-release@v1
         with:
-          # !!! הקפד להחליף את 'ApkTranslator.exe' בשם הקובץ שלך
-          files: dist/ApkTranslator.exe
+          # שם ה-EXE יהיה כפי שהוגדר בפרמטר --name
+          files: dist/APKTranslator.exe
           
           tag_name: "v${{ github.run_number }}"
-          
-          # >>> תיקון שם הפרמטר מ-release_name ל-name <<<
           name: "Release v${{ github.run_number }}"
-          
-          body: "Automated release of the compiled application."
+          body: "Automated release of APKTranslator, built with external binaries."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
